@@ -5,7 +5,12 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { buildFixPlan } from "./plan.js";
-import { ScanBusyError, runScan } from "./scan-pipeline.js";
+import {
+  ScanBusyError,
+  ScanPartialFailureError,
+  ScanStartupFailureError,
+  runScan,
+} from "./scan-pipeline.js";
 import type { AuditReport } from "./types.js";
 
 const app = new Hono();
@@ -25,12 +30,20 @@ app.post("/api/scan", async (c) => {
 
   const target = body.target ?? "./demo-app";
 
+  const sample = c.req.header("x-vibeguard-sample") === "1";
+
   try {
-    const report = await runScan(target);
+    const report = await runScan(target, { sample });
     return c.json(report);
   } catch (err) {
     if (err instanceof ScanBusyError) {
       return c.json({ error: err.message }, 409);
+    }
+    if (err instanceof ScanStartupFailureError) {
+      return c.json({ error: err.message }, 503);
+    }
+    if (err instanceof ScanPartialFailureError) {
+      return c.json({ error: err.message, partial: err.partial }, 502);
     }
     throw err;
   }

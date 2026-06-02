@@ -11,6 +11,15 @@ export interface Finding {
   reportedBy?: string;
 }
 
+export type SpecialistAgentId = "secrets-scout" | "auth-guard" | "injection-hunter";
+
+export type FindingInput = Omit<Finding, "id">;
+
+export interface AgentReport {
+  agent: SpecialistAgentId;
+  findings: FindingInput[];
+}
+
 export interface AuditReport {
   grade: string;
   summary: string;
@@ -20,3 +29,13 @@ export interface AuditReport {
   findings: Finding[];
   agentContributions: Record<string, number>;
 }
+
+export type ScanProgressEvent =
+  | { type: "scan:start"; target: string }
+  | { type: "agent:start"; agent: string }
+  | { type: "agent:done"; agent: string; findings: number }
+  | { type: "agent:error"; agent: string; message: string }
+  | { type: "orchestrator:start" }
+  | { type: "orchestrator:done" }
+  | { type: "scan:complete"; auditReport: AuditReport }
+  | { type: "scan:error"; message: string };
