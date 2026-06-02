@@ -25,6 +25,11 @@ isProject: false
 
 # VibeGuard: Multi-Agent Security Scanner (1-Hour Hackathon)
 
+**Implementation phases:**
+
+- [60-minute phased build](./security-multi-agent-demo-phases.md) — full Demo A with live agents
+- [20-minute phased build](./security-multi-agent-demo-phases-20min.md) — sample-driven UI + PLAN; live scan as follow-up
+
 ## Goal
 
 Ship **`npm run dev`** — the **Demo A** surface: a local **Audit UI** on port **3333** where you click **Run security audit**, watch three specialists run in parallel, review an **audit report** from the **Orchestrator**, then **generate a fix PLAN** and **Copy for Cursor** on `demo-app`.
