@@ -107,15 +107,16 @@ async function runLiveScan(
           type: "agent:done",
           agent,
           findings: result.report.findings.length,
+          runId: result.runId,
         });
-        console.log(`[${agent}] runId=${result.runId} findings=${result.report.findings.length}`);
       } else {
         onProgress?.({
           type: "agent:error",
           agent,
           message: result.message,
+          kind: result.kind,
+          runId: result.runId,
         });
-        console.error(`[${agent}] ${result.kind}: ${result.message}`);
       }
       return result;
     }),
@@ -170,6 +171,7 @@ export async function runScan(
       ? await getSampleReport()
       : await runLiveScan(target, options?.onProgress);
 
+    options?.onProgress?.({ type: "report:write", path: auditReportPath });
     const safe = normalizeAuditReport(report, []);
     await writeAuditReport(safe);
     return safe;

@@ -42,6 +42,7 @@ export async function runAgentForJson<T>(options: {
     }
     return { ok: true, data, runId: first.runId, text: first.text };
   } catch (parseErr) {
+    console.warn(`[${options.input.id}] invalid JSON, retrying agent…`);
     const retry = await runAgent(
       {
         id: options.input.id,
