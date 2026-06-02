@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VibeGuard — Security Audit</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="brand">
+        <h1>VibeGuard</h1>
+        <span class="subtitle">Security Audit</span>
+      </div>
+      <div class="header-meta">
+        <span class="target-label">Target: <code>./demo-app</code></span>
+        <a href="/demo-app/README.md" target="_blank" rel="noopener">demo-app README</a>
+      </div>
+      <button type="button" id="scan-btn" class="btn btn-primary">
+        Run security audit
+      </button>
+    </header>
+
+    <section class="agents" aria-label="Agent pipeline">
+      <div class="pill" data-agent="secrets-scout">
+        <span class="pill-name">secrets-scout</span>
+        <span class="pill-status">idle</span>
+      </div>
+      <div class="pill" data-agent="auth-guard">
+        <span class="pill-name">auth-guard</span>
+        <span class="pill-status">idle</span>
+      </div>
+      <div class="pill" data-agent="injection-hunter">
+        <span class="pill-name">injection-hunter</span>
+        <span class="pill-status">idle</span>
+      </div>
+      <div class="pill" data-agent="orchestrator">
+        <span class="pill-name">orchestrator</span>
+        <span class="pill-status">idle</span>
+      </div>
+    </section>
+
+    <p id="scan-error" class="scan-error hidden" role="alert"></p>
+
+    <section id="hero" class="hero hidden" aria-label="Audit summary">
+      <div class="hero-top">
+        <div id="grade-badge" class="grade-badge">—</div>
+        <div id="severity-chips" class="severity-chips"></div>
+      </div>
+      <p id="summary" class="summary"></p>
+      <div class="hero-block">
+        <h2>Top exploit chain</h2>
+        <p id="exploit-chain"></p>
+      </div>
+      <div class="hero-block">
+        <h2>Demo script</h2>
+        <ol id="demo-script"></ol>
+      </div>
+    </section>
+
+    <section id="findings-section" class="findings-section hidden">
+      <h2>Findings</h2>
+      <div id="findings-list" class="findings-list"></div>
+    </section>
+
+    <section id="plan-section" class="plan-section">
+      <h2>Fix PLAN</h2>
+      <div class="plan-actions">
+        <button type="button" id="plan-btn" class="btn" disabled>
+          Generate fix PLAN
+        </button>
+        <button type="button" id="copy-btn" class="btn btn-secondary" disabled>
+          Copy for Cursor
+        </button>
+      </div>
+      <pre id="plan-preview" class="plan-preview hidden"></pre>
+    </section>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

