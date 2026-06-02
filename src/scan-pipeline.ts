@@ -66,7 +66,64 @@ async function persistAuditReport(
   interim = false,
 ): Promise<AuditReport> {
   const safe = normalizeAuditReport(report, specialistReports);
-  await writeFile(auditReportPath, `${JSON.stringify(safe, null, 2)}\n`, "utf-8");
+  const payload = `${JSON.stringify(safe, null, 2)}\n`;
+  // #region agent log
+  fetch("http://127.0.0.1:7867/ingest/c884048d-8ce4-4e90-9f8d-81dfc57801fd", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "cf7d9a",
+    },
+    body: JSON.stringify({
+      sessionId: "cf7d9a",
+      hypothesisId: "A,B,C",
+      location: "scan-pipeline.ts:persistAuditReport:before-write",
+      message: "persistAuditReport before writeFile",
+      data: {
+        auditReportPath,
+        rootDir,
+        cwd: process.cwd(),
+        interim,
+        inGrade: report.grade,
+        inFindings: report.findings?.length ?? -1,
+        safeGrade: safe.grade,
+        safeFindings: safe.findings.length,
+        payloadBytes: payload.length,
+        specialistCount: specialistReports.length,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+  await writeFile(auditReportPath, payload, "utf-8");
+  const readBack = await readFile(auditReportPath, "utf-8");
+  const parsed = JSON.parse(readBack) as AuditReport;
+  // #region agent log
+  fetch("http://127.0.0.1:7867/ingest/c884048d-8ce4-4e90-9f8d-81dfc57801fd", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "cf7d9a",
+    },
+    body: JSON.stringify({
+      sessionId: "cf7d9a",
+      hypothesisId: "D,E",
+      location: "scan-pipeline.ts:persistAuditReport:after-write",
+      message: "persistAuditReport after writeFile read-back",
+      data: {
+        auditReportPath,
+        interim,
+        readBackBytes: readBack.length,
+        diskGrade: parsed.grade,
+        diskFindings: parsed.findings?.length ?? -1,
+        diskMatchesSafe:
+          parsed.grade === safe.grade &&
+          (parsed.findings?.length ?? 0) === safe.findings.length,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
   onProgress?.({ type: "report:write", path: auditReportPath, interim });
   return safe;
 }
@@ -194,10 +251,52 @@ export async function runScan(
   try {
     if (options?.sample) {
       const report = await getSampleReport();
+      // #region agent log
+      fetch("http://127.0.0.1:7867/ingest/c884048d-8ce4-4e90-9f8d-81dfc57801fd", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "cf7d9a",
+        },
+        body: JSON.stringify({
+          sessionId: "cf7d9a",
+          hypothesisId: "E",
+          location: "scan-pipeline.ts:runScan:sample-mode",
+          message: "runScan sample mode persist",
+          data: {
+            grade: report.grade,
+            findings: report.findings?.length ?? -1,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       return persistAuditReport(report, [], options?.onProgress);
     }
 
     const { report, specialistReports } = await runLiveScan(target, options?.onProgress);
+    // #region agent log
+    fetch("http://127.0.0.1:7867/ingest/c884048d-8ce4-4e90-9f8d-81dfc57801fd", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "cf7d9a",
+      },
+      body: JSON.stringify({
+        sessionId: "cf7d9a",
+        hypothesisId: "A",
+        location: "scan-pipeline.ts:runScan:before-final-persist",
+        message: "runScan calling final persistAuditReport",
+        data: {
+          sample: false,
+          grade: report.grade,
+          findings: report.findings.length,
+          specialistReports: specialistReports.length,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     return persistAuditReport(report, specialistReports, options?.onProgress);
   } finally {
     busy = false;
