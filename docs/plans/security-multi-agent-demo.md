@@ -1,9 +1,9 @@
 ---
 name: Security Multi-Agent Demo
-overview: Build a TypeScript orchestrator using `@cursor/sdk` plus a single-page web UI that runs 3 parallel security agents against a bundled vulnerable demo app, then displays a Chief-synthesized scorecard in the browser — optimized for a compelling 60-minute live demo.
+overview: Build a TypeScript scan pipeline using `@cursor/sdk` plus a single-page Audit UI that runs 3 parallel security agents against a bundled vulnerable demo app, synthesizes an Orchestrator audit report, and lets you export a fix PLAN for any coding agent (e.g. Cursor) — optimized for a compelling 60-minute live demo.
 todos:
   - id: scaffold
-    content: Scaffold vibeguard/ TypeScript project with @cursor/sdk, types.ts, orchestrator, and minimal Hono server
+    content: Scaffold vibeguard/ TypeScript project with @cursor/sdk, types.ts, scan-pipeline, and minimal Hono server
     status: pending
   - id: demo-app
     content: Create demo-app/ with 5-7 intentionally vulnerable patterns (secrets, auth, IDOR, XSS/SQLi)
@@ -11,14 +11,14 @@ todos:
   - id: specialists
     content: Implement secrets-scout, auth-guard, injection-hunter prompts and test each with Agent.prompt
     status: pending
-  - id: orchestrator
-    content: Wire parallel Phase 1 + Chief synthesis in orchestrator.ts with JSON parsing and progress events
+  - id: scan-pipeline
+    content: Wire parallel Phase 1 + Orchestrator synthesis in scan-pipeline.ts with JSON parsing and progress events
     status: pending
   - id: web-ui
-    content: Build single-page UI (public/index.html + app.js) with scan button, agent status, scorecard, findings list
+    content: Build Audit UI (scan, agent status, audit report, findings) + Generate fix PLAN export for coding agents
     status: pending
   - id: demo-rehearsal
-    content: Wire npm run dev, rehearse browser-first Demo A script
+    content: Wire npm run dev, rehearse browser-first Demo A script (scan → audit → copy PLAN)
     status: pending
 isProject: false
 ---
@@ -27,16 +27,21 @@ isProject: false
 
 ## Goal
 
-Ship **`npm run dev`** — a local web app on one page where you click **Scan**, watch three agents run in parallel, and see a **judge-friendly security scorecard** in the browser (not just the terminal).
+Ship **`npm run dev`** — a local **Audit UI** on one page where you click **Scan**, watch three specialists run in parallel, review an **audit report** synthesized by the **Orchestrator** agent, then **generate a fix PLAN** you can paste into Cursor (or any coding agent) to remediate findings.
 
 ```bash
 npm run dev          # http://localhost:3333 — primary demo surface
-npm run scan         # optional CLI trigger; writes report + can skip UI during dev
+npm run scan         # optional CLI trigger; writes audit report + can skip UI during dev
 ```
 
 **Stack:** TypeScript + `@cursor/sdk` + **Hono** (tiny HTTP server) + **vanilla HTML/CSS/JS** (no React build step — saves hackathon time). Local agent runtime, model `composer-2.5`.
 
-**Why a web UI for the demo:** judges see grade, exploit chain, and findings at a glance; agent pills animate from pending → running → done; much stronger than scrolling terminal output.
+**Why a web UI for the demo:** judges see audit grade, exploit chain, and findings at a glance; agent pills animate from pending → running → done; **Audit → PLAN** closes the loop from detection to remediation without leaving the browser.
+
+**Naming:**
+- **Orchestrator** — the Phase 2 synthesis *agent* (dedupe, grade, narrative). Not to be confused with the TypeScript **scan pipeline** (`scan-pipeline.ts`) that schedules agents and serves HTTP.
+- **Audit report** — the structured JSON artifact the Orchestrator produces (formerly “scorecard”).
+- **Fix PLAN** — a markdown document derived from the audit report, formatted for coding agents to execute fixes in order.
 
 ---
 
@@ -44,19 +49,22 @@ npm run scan         # optional CLI trigger; writes report + can skip UI during 
 
 ```mermaid
 flowchart TB
-  subgraph browser [Single-page UI]
+  subgraph browser [Audit UI]
     Page[index.html]
     ScanBtn[Scan button]
     AgentPills[Agent status pills]
-    Scorecard[Grade + exploit chain]
+    AuditHero[Audit report hero]
     Findings[Findings list]
+    PlanPanel[Fix PLAN panel]
+    GenPlan[Generate fix PLAN]
   end
 
   subgraph server [Hono server :3333]
     Static[serve public/]
     ScanAPI[POST /api/scan]
+    PlanAPI[POST /api/plan]
     EventsAPI[GET /api/scan/events SSE]
-    Orchestrator[orchestrator.ts]
+    ScanPipeline[scan-pipeline.ts]
   end
 
   subgraph phase1 [Phase 1 - Parallel specialists]
@@ -66,39 +74,42 @@ flowchart TB
   end
 
   subgraph phase2 [Phase 2 - Synthesis]
-    Chief[ChiefAgent]
+    OrchAgent[Orchestrator agent]
   end
 
   DemoApp[(demo-app repo)]
 
   Page --> ScanBtn
   ScanBtn -->|POST| ScanAPI
-  ScanAPI --> Orchestrator
-  Orchestrator --> Secrets
-  Orchestrator --> Auth
-  Orchestrator --> Injection
+  ScanAPI --> ScanPipeline
+  ScanPipeline --> Secrets
+  ScanPipeline --> Auth
+  ScanPipeline --> Injection
   DemoApp --> Secrets
   DemoApp --> Auth
   DemoApp --> Injection
-  Orchestrator -->|progress events| EventsAPI
+  ScanPipeline -->|progress events| EventsAPI
   EventsAPI --> AgentPills
-  Secrets --> Chief
-  Auth --> Chief
-  Injection --> Chief
-  Chief -->|Scorecard JSON| Page
-  Page --> Scorecard
+  Secrets --> OrchAgent
+  Auth --> OrchAgent
+  Injection --> OrchAgent
+  OrchAgent -->|AuditReport JSON| Page
+  Page --> AuditHero
   Page --> Findings
+  GenPlan -->|POST auditReport| PlanAPI
+  PlanAPI -->|FixPlan markdown| PlanPanel
   Static --> Page
 ```
 
 **Data flow:**
-1. User opens `localhost:3333` → static single page loads (optionally pre-filled from last `report.json`).
-2. User clicks **Scan demo-app** → `POST /api/scan` starts orchestrator.
-3. Orchestrator emits progress events (`agent:start`, `agent:done`, `chief:start`, `scan:complete`) over **SSE** (`GET /api/scan/events`) so pills update live without polling.
-4. On complete, response body (or final SSE event) carries full `Scorecard` → UI renders grade, chain, findings.
-5. Server also writes `public/report.json` so refresh preserves last result.
+1. User opens `localhost:3333` → Audit UI loads (optionally pre-filled from last `public/audit-report.json`).
+2. User clicks **Run security scan** → `POST /api/scan` starts the scan pipeline.
+3. Scan pipeline emits progress events (`agent:start`, `agent:done`, `orchestrator:start`, `scan:complete`) over **SSE** (`GET /api/scan/events`) so pills update live without polling.
+4. On complete, response body (or final SSE event) carries full `AuditReport` → UI renders grade, chain, findings.
+5. User clicks **Generate fix PLAN** → `POST /api/plan` (or client-side `buildFixPlan(auditReport)` if behind schedule) returns markdown → preview + **Copy for Cursor**.
+6. Server also writes `public/audit-report.json` so refresh preserves last audit.
 
-**SDK pattern:** `Agent.prompt(...)` for all four agents. CLI `scan.ts` calls the same `runScan()` export as the API route.
+**SDK pattern:** `Agent.prompt(...)` for all four agents (3 specialists + Orchestrator). CLI `scan.ts` calls the same `runScan()` export as the API route.
 
 **Critical SDK guardrails:**
 - Always set `local: { cwd: targetRepo }` explicitly
@@ -117,58 +128,114 @@ vibeguard/
 ├── src/
 │   ├── server.ts             # Hono app, static + API + SSE
 │   ├── scan.ts               # optional CLI wrapper around runScan()
-│   ├── orchestrator.ts       # runScan(target, onProgress) → Scorecard
+│   ├── scan-pipeline.ts      # runScan(target, onProgress) → AuditReport
+│   ├── plan.ts               # buildFixPlan(auditReport) → FixPlan markdown
 │   ├── prompts/
 │   │   ├── secrets.ts
 │   │   ├── auth.ts
 │   │   ├── injection.ts
-│   │   └── chief.ts
+│   │   └── orchestrator.ts   # Phase 2 synthesis agent
 │   └── types.ts
-├── public/                   # single-page UI (no bundler)
-│   ├── index.html            # one page: layout + sections
+├── public/                   # Audit UI (no bundler)
+│   ├── index.html            # one page: audit + PLAN sections
 │   ├── styles.css
-│   ├── app.js                # fetch scan, SSE, render scorecard
-│   └── report.json           # last scan (gitignored or committed sample for offline demo)
+│   ├── app.js                # fetch scan, SSE, render audit, generate/copy PLAN
+│   └── audit-report.json     # last audit (gitignored or committed sample for offline demo)
 └── demo-app/                 # intentionally vulnerable target
     └── ...
 ```
 
 ---
 
-## Single-page UI design
+## Audit UI design
 
-One scrollable page, four sections — keep CSS minimal (system fonts, dark theme reads well on projector).
+One scrollable page, **five sections** — keep CSS minimal (system fonts, dark theme reads well on projector). Frame the page as **Security Audit**, not a generic dashboard.
 
 ### Section 1: Header + scan control
-- Title: **VibeGuard**
-- Subtitle: target path (`./demo-app`) — read-only for hackathon; no path picker needed
-- Primary button: **Run security scan**
+- Title: **VibeGuard** · subtitle: **Security Audit**
+- Target path (`./demo-app`) — read-only for hackathon; no path picker needed
+- Primary button: **Run security audit**
 - Secondary: link to demo-app README ("what we shipped in one vibe session")
 
 ### Section 2: Agent pipeline (live status)
-Three horizontal pills, each showing agent name + state:
+Three horizontal pills for specialists, plus Orchestrator when Phase 1 completes:
 
 | Agent | Idle | Running | Done |
 |-------|------|---------|------|
 | secrets-scout | gray | pulse amber | green + finding count |
 | auth-guard | gray | pulse amber | green + count |
 | injection-hunter | gray | pulse amber | green + count |
-| chief (synthesizer) | hidden until Phase 1 done | pulse | green |
+| orchestrator | hidden until Phase 1 done | pulse | green |
 
-Use SSE events: `{ type: "agent:start", agent: "secrets-scout" }`, `{ type: "agent:done", agent: "...", findings: 2 }`.
+Use SSE events: `{ type: "agent:start", agent: "secrets-scout" }`, `{ type: "agent:done", agent: "...", findings: 2 }`, `{ type: "orchestrator:start" }`, `{ type: "orchestrator:done" }`.
 
-### Section 3: Scorecard hero
+### Section 3: Audit report hero
 - Large **grade badge** (`F` / `D` / …) with color (red for F, green for A)
 - Severity chips: Critical / High / Medium / Low counts
-- **Top exploit chain** — highlighted callout box (Chief narrative)
+- **Executive summary** — one paragraph from Orchestrator
+- **Top exploit chain** — highlighted callout box (Orchestrator narrative)
 - **Demo script** — 3 numbered steps (for presenter to read aloud)
 
 ### Section 4: Findings list
 - Card per finding: severity badge, title, file:line, evidence monospace block, exploit scenario, fix hint
+- Optional checkbox per finding to include/exclude from fix PLAN (default: all critical + high checked)
 - Filter tabs: All | Critical | High (optional if time — otherwise sort critical-first only)
-- Footer: `agentContributions` bar chart or simple text ("auth-guard: 3 findings")
+- Footer: `agentContributions` simple text ("auth-guard: 3 findings")
 
-**Offline demo fallback:** commit a sample `public/report.json` from a successful run so the UI looks populated even if API key fails during judging.
+### Section 5: Fix PLAN for coding agents
+Visible once an audit report exists (disabled until scan completes).
+
+- **Generate fix PLAN** — builds ordered remediation steps from selected findings
+- **Preview** — monospace panel with markdown PLAN (scrollable)
+- **Copy for Cursor** — clipboard; presenter pastes into Cursor Agent chat on `demo-app`
+- Optional: **Download** `fix-plan.md`
+
+**Fix PLAN structure** (deterministic template in `plan.ts`; no extra LLM call required for hackathon). Always emit the **time-box disclaimer** at the top (visually prominent in the UI preview). `buildFixPlan` should cap tasks to what fits **20–30 minutes** (e.g. critical + high only, max 5 tasks, smallest viable fix per task).
+
+```markdown
+# Security remediation PLAN
+
+Target repo: ./demo-app
+Audit grade: F
+Generated: <ISO timestamp>
+
+---
+
+## ⏱️ TIME BOX — READ FIRST (required)
+
+> ### You have **20–30 minutes total** for this entire PLAN.
+>
+> **Scope must be totally appropriate for that window.** Do not attempt a full security hardening pass, large refactors, new auth systems, or “perfect” fixes.
+>
+> - Prefer **minimal, targeted patches** (remove a leaked secret, add a guard clause, parameterize one query) over redesigns.
+> - If a task would exceed ~10 minutes, **stop after a documented partial fix** or skip it and note why in your summary.
+> - **Do not** add new dependencies, frameworks, or test suites unless already in the repo and trivial to run.
+> - It is acceptable to fix **only the tasks listed below** and leave lower-severity items for a follow-up PLAN.
+>
+> **Success = demonstrable risk reduction in the time box**, not an A-grade audit on the first pass.
+
+---
+
+## Instructions for the coding agent
+You are fixing security issues identified by an automated audit. Work through tasks **in order** within the **20–30 minute** time box above.
+For each task: implement the **smallest correct fix**, run relevant tests or lint if they already exist, and briefly note what changed.
+Do not introduce new features. Use fake/test credentials only where secrets are required.
+If you cannot finish all tasks in time, complete highest-severity items first and list what was deferred.
+
+## Tasks
+
+### Task 1: [CRITICAL] Remove hardcoded admin token from client
+- **File:** `page.tsx` (line ~42)
+- **Issue:** Admin token exposed in client bundle
+- **Fix:** Move auth to server-side session or env-only server secret
+- **Acceptance:** Token string not present in client source; admin route still protected
+
+### Task 2: ...
+```
+
+**Stretch:** second button **Enhance PLAN with Orchestrator** — optional `Agent.prompt` that rewrites the template PLAN with richer context (cut if behind).
+
+**Offline demo fallback:** commit a sample `public/audit-report.json` from a successful run so the Audit UI and PLAN generator work even if API key fails during judging.
 
 ---
 
@@ -177,7 +244,11 @@ Use SSE events: `{ type: "agent:start", agent: "secrets-scout" }`, `{ type: "age
 ```typescript
 // POST /api/scan
 // Body: { target?: string }  default "./demo-app"
-// Response: Scorecard (200) or { error, partial } (502)
+// Response: AuditReport (200) or { error, partial } (502)
+
+// POST /api/plan
+// Body: { auditReport: AuditReport; findingIds?: string[] }
+// Response: { plan: string }  // markdown Fix PLAN (200)
 
 // GET /api/scan/events  (SSE while scan in flight)
 type ScanEvent =
@@ -185,9 +256,9 @@ type ScanEvent =
   | { type: "agent:start"; agent: string }
   | { type: "agent:done"; agent: string; findings: number }
   | { type: "agent:error"; agent: string; message: string }
-  | { type: "chief:start" }
-  | { type: "chief:done" }
-  | { type: "scan:complete"; scorecard: Scorecard }
+  | { type: "orchestrator:start" }
+  | { type: "orchestrator:done" }
+  | { type: "scan:complete"; auditReport: AuditReport }
   | { type: "scan:error"; message: string };
 ```
 
@@ -197,7 +268,7 @@ type ScanEvent =
 
 ## Shared agent JSON contract
 
-Unchanged from prior plan — specialists return `AgentReport`, Chief returns `Scorecard`:
+Specialists return `AgentReport`; Orchestrator agent returns `AuditReport`:
 
 ```typescript
 interface Finding {
@@ -212,7 +283,7 @@ interface Finding {
   fixHint: string;
 }
 
-interface Scorecard {
+interface AuditReport {
   grade: string;
   summary: string;
   findingCount: { critical: number; high: number; medium: number; low: number };
@@ -222,6 +293,8 @@ interface Scorecard {
   agentContributions: Record<string, number>;
 }
 ```
+
+`buildFixPlan(report, selectedFindingIds?)` maps `AuditReport.findings` → markdown: always prepend the time-box disclaimer, sort by severity then file path, and **limit task count** so the PLAN stays realistic for 20–30 minutes (default: critical + high, max 5 tasks).
 
 ---
 
@@ -239,9 +312,10 @@ interface Scorecard {
 - SQLi, XSS sinks, `eval`, unsafe HTML
 - Output: `agent: "injection-hunter"`
 
-### Agent 4: Chief Agent
-- Dedupe, grade, exploit chain, demo script
+### Agent 4: Orchestrator
+- Dedupe specialist findings, assign grade, executive summary, exploit chain, demo script
 - Input: merged specialist JSON only (no re-scan)
+- Output: `AuditReport` JSON
 
 ---
 
@@ -261,76 +335,77 @@ Use fake secrets only (`sk-fake-`, `ghp_fake_`).
 
 ---
 
-## 60-minute build schedule (revised for UI)
+## 60-minute build schedule (revised for Audit + PLAN)
 
 | Minutes | Task |
 |---------|------|
-| 0–8 | Scaffold: Hono server, `runScan()` stub, empty `public/index.html` shell |
+| 0–8 | Scaffold: Hono server, `runScan()` stub, empty Audit UI shell |
 | 8–20 | Create `demo-app` with planted vulns |
 | 20–32 | Three specialist prompts + test via CLI `scan.ts` |
-| 32–42 | Orchestrator + Chief + progress callbacks for SSE |
-| 42–52 | **Web UI:** agent pills, scorecard hero, findings list, wire POST + SSE |
-| 52–60 | Commit sample `report.json`; rehearse browser demo twice |
+| 32–42 | Scan pipeline + Orchestrator agent + progress callbacks for SSE |
+| 42–50 | **Audit UI:** agent pills, audit report hero, findings list, wire POST + SSE |
+| 50–58 | **`plan.ts` + PLAN panel:** generate, preview, copy for Cursor |
+| 58–60 | Commit sample `audit-report.json`; rehearse scan → PLAN demo twice |
 
-**Cut if behind:** skip SSE — use single blocking POST with spinner text "Scanning… (~90s)"; pills jump to done all at once when response returns.
+**Cut if behind:** skip SSE — single blocking POST with spinner; skip finding checkboxes (PLAN includes all critical + high).
 
-**Cut if more behind:** skip filter tabs and agent contribution chart.
+**Cut if more behind:** skip filter tabs and agent contribution footer; client-only `buildFixPlan` (no `POST /api/plan`).
 
-**Add if ahead:** severity filter, expand/collapse finding cards, `--fix-top` button on UI.
+**Add if ahead:** Orchestrator-enhanced PLAN, severity filter, expand/collapse finding cards, download `fix-plan.md`.
 
 ---
 
 ## Demo ideas (browser-first)
 
-### Demo A: "Vibe Check Live" (recommended)
+### Demo A: "Audit to fix" (recommended)
 
-1. Browser on `localhost:3333` — empty scorecard, three gray agent pills.
-2. Show `demo-app` README in another tab: *"Shipped in one Cursor session."*
-3. Click **Run security scan** — pills turn amber one by one, then green with counts.
-4. Page animates to grade **F**, red badge, exploit chain callout fills in.
-5. Scroll findings — click one critical: *"Hardcoded token in client + open admin API."*
-6. Optional: refresh page — last report still visible from `report.json`.
+1. Browser on `localhost:3333` — empty audit, three gray agent pills.
+2. Show `demo-app` README: *"Shipped in one Cursor session."*
+3. Click **Run security audit** — pills animate; Orchestrator pill appears; grade **F** and exploit chain fill in.
+4. Scroll findings — highlight one critical chain.
+5. Click **Generate fix PLAN** → preview tasks → **Copy for Cursor** → switch to Cursor on `demo-app` and paste: *"This is the remediation plan from our audit."*
+6. Optional: refresh — last audit still visible from `audit-report.json`.
 
 ### Demo B: "Before / After"
 
-Pre-load UI with sample `report.json` (grade F). Run scan on `demo-app-safe/` (pre-built clean variant) — grade flips to **B** in same UI. Strong product story without new code.
+Pre-load UI with sample `audit-report.json` (grade F). Run audit on `demo-app-safe/` — grade flips to **B**; regenerate PLAN (fewer or no tasks). Strong product story.
 
-### Demo C: "Agent Debate"
+### Demo C: "Agent overlap"
 
-Chief's deduped list shows one IDOR flagged by both auth-guard and injection-hunter — mention in UI subtitle or a "also reported by" tag on finding cards (stretch).
+Orchestrator's deduped list shows one IDOR flagged by both auth-guard and injection-hunter — "also reported by" tag on finding cards (stretch).
 
-### Demo D: "CI Gate"
+### Demo D: "CI + human loop"
 
-Show that `POST /api/scan` returns JSON consumable by CI; UI is the human-facing layer. One slide with GitHub Action pseudo-code — no need to implement in the hour.
+`POST /api/scan` returns `AuditReport` for CI; `POST /api/plan` or exported markdown for developer agents. One slide with GitHub Action pseudo-code — no need to implement in the hour.
 
 ---
 
 ## CLI role (secondary)
 
-Keep `npm run scan` for fast iteration without opening browser:
-
 ```bash
-npm run scan -- ./demo-app   # runs runScan(), writes public/report.json, prints grade one-liner
+npm run scan -- ./demo-app   # runs runScan(), writes public/audit-report.json, prints grade one-liner
 ```
 
-Terminal output is minimal (grade + path to open UI). **Judges see the web page, not the terminal.**
+Terminal output is minimal (grade + path to open Audit UI). **Judges see the browser: audit → PLAN → Cursor.**
 
 ---
 
 ## Success criteria
 
-- `npm run dev` serves single-page UI on port 3333
-- Scan button triggers full multi-agent pipeline and renders scorecard in browser
+- `npm run dev` serves Audit UI on port 3333
+- Scan button triggers full multi-agent pipeline and renders **audit report** in browser
 - Agent status visible during scan (SSE or blocking with clear loading state)
+- **Generate fix PLAN** produces copy-pasteable markdown for a coding agent from the audit report
 - At least **5 of 7** planted vulns detected
-- Sample `report.json` committed for offline fallback
-- Demo rehearsed in **under 3 minutes** with browser as primary surface
+- Sample `audit-report.json` committed for offline fallback
+- Demo rehearsed in **under 3 minutes**: scan → audit → copy PLAN
 
 ---
 
 ## Optional stretch (post-hackathon)
 
-- Fourth agent: Dependency Sentry
+- Orchestrator agent also drafts PLAN prose (in addition to template `plan.ts`)
+- Fourth specialist: Dependency Sentry
 - WebSocket instead of SSE
 - Vite + React if you outgrow vanilla JS
-- Cloud runtime + auto-fix PR from UI button
+- Cloud runtime + one-click "Open in Cursor" deep link with PLAN in context
