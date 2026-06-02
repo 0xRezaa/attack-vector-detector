@@ -141,9 +141,20 @@ body {
   }
 }
 
+.scan-status {
+  color: var(--running);
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
 .scan-error {
   color: var(--critical);
   margin-bottom: 1rem;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .hidden {

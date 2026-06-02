@@ -39,18 +39,21 @@ function setPillsIdle() {
   }
 }
 
-async function animateScanPills() {
-  const specialists = ["secrets-scout", "auth-guard", "injection-hunter"];
-  for (const agent of specialists) {
+function setPillsScanning() {
+  for (const agent of AGENT_ORDER) {
     setPill(agent, "running", "running…");
-    await new Promise((r) => setTimeout(r, 400));
-    const count =
-      currentReport?.agentContributions?.[agent] ??
-      specialists.indexOf(agent) + 2;
-    setPill(agent, "done", `done · ${count}`);
   }
-  setPill("orchestrator", "running", "running…");
-  await new Promise((r) => setTimeout(r, 400));
+}
+
+function setScanStatus(message) {
+  const el = $("#scan-status");
+  if (!message) {
+    el.textContent = "";
+    el.classList.add("hidden");
+    return;
+  }
+  el.textContent = message;
+  el.classList.remove("hidden");
 }
 
 function renderSeverityChips(counts) {
@@ -130,14 +133,38 @@ async function loadReport() {
   renderReport(report);
 }
 
+function formatScanError(status, body) {
+  if (status === 409) {
+    return body.error ?? "Scan already in progress. Please wait.";
+  }
+  if (status === 503) {
+    return (
+      body.error ??
+      "Scan agents failed to start. Check CURSOR_API_KEY in .env and retry."
+    );
+  }
+  if (status === 502) {
+    const detail =
+      body.partial?.errors
+        ?.map((e) => `${e.agent}: ${e.message}`)
+        .join("; ") ?? "";
+    const base = body.error ?? "Partial scan failure — not enough specialists returned valid JSON.";
+    return detail ? `${base} (${detail})` : base;
+  }
+  return body.error ?? `Scan failed (${status})`;
+}
+
 async function runScan() {
   const errEl = $("#scan-error");
-  errEl.classList.add("hidden");
-  $("#scan-btn").disabled = true;
-  $("#plan-btn").disabled = true;
-  setPillsIdle();
+  const scanBtn = $("#scan-btn");
+  const prevBtnText = scanBtn.textContent;
 
-  const anim = animateScanPills();
+  errEl.classList.add("hidden");
+  scanBtn.disabled = true;
+  scanBtn.textContent = "Scanning…";
+  $("#plan-btn").disabled = true;
+  setScanStatus("Running multi-agent scan — this may take a few minutes…");
+  setPillsScanning();
 
   try {
     const res = await fetch("/api/scan", {
@@ -145,21 +172,30 @@ async function runScan() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ target: "./demo-app" }),
     });
-    await anim;
-    if (res.status === 409) {
-      errEl.textContent = "Scan already in progress. Please wait.";
+
+    let body = {};
+    try {
+      body = await res.json();
+    } catch {
+      body = {};
+    }
+
+    if (!res.ok) {
+      errEl.textContent = formatScanError(res.status, body);
       errEl.classList.remove("hidden");
+      setPillsIdle();
       return;
     }
-    if (!res.ok) throw new Error(`Scan failed (${res.status})`);
-    const report = await res.json();
-    renderReport(report);
+
+    renderReport(body);
   } catch (e) {
     errEl.textContent = e instanceof Error ? e.message : "Scan failed";
     errEl.classList.remove("hidden");
     setPillsIdle();
   } finally {
-    $("#scan-btn").disabled = false;
+    scanBtn.disabled = false;
+    scanBtn.textContent = prevBtnText;
+    setScanStatus("");
   }
 }
 

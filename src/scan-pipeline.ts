@@ -170,8 +170,9 @@ export async function runScan(
       ? await getSampleReport()
       : await runLiveScan(target, options?.onProgress);
 
-    await writeAuditReport(report);
-    return report;
+    const safe = normalizeAuditReport(report, []);
+    await writeAuditReport(safe);
+    return safe;
   } finally {
     busy = false;
   }

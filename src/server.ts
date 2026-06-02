@@ -57,7 +57,7 @@ app.post("/api/plan", async (c) => {
 
 app.use("/*", serveStatic({ root: "./public" }));
 
-serve(
+const server = serve(
   {
     fetch: app.fetch,
     port: 3333,
@@ -66,3 +66,13 @@ serve(
     console.log(`VibeGuard listening on http://localhost:${info.port}`);
   },
 );
+
+server.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(
+      "Port 3333 is already in use. Free it with:\n  kill $(lsof -t -i :3333)\nThen run npm run dev again.",
+    );
+    process.exit(1);
+  }
+  throw err;
+});
