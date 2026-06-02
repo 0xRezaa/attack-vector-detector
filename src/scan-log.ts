@@ -47,9 +47,11 @@ export function logScanProgress(event: ScanProgressEvent): void {
     case "orchestrator:done":
       console.log(`[${t}] orchestrator finished`);
       break;
-    case "report:write":
-      console.log(`[${t}] writing audit report → ${event.path}`);
+    case "report:write": {
+      const label = event.interim ? "interim audit report" : "audit report";
+      console.log(`[${t}] wrote ${label} → ${event.path}`);
       break;
+    }
     case "scan:complete":
       console.log(
         `[${t}] scan complete — grade ${event.auditReport.grade}, ${event.auditReport.findings.length} finding(s)`,

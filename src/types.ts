@@ -41,7 +41,7 @@ export type ScanProgressEvent =
       kind?: string;
       runId?: string;
     }
-  | { type: "report:write"; path: string }
+  | { type: "report:write"; path: string; interim?: boolean }
   | { type: "orchestrator:start" }
   | { type: "orchestrator:done" }
   | { type: "scan:complete"; auditReport: AuditReport }

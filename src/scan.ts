@@ -23,6 +23,7 @@ try {
   console.log(
     `Findings: ${report.findings.length} (critical=${report.findingCount.critical}, high=${report.findingCount.high})`,
   );
+  console.log("Report saved to public/audit-report.json");
 } catch (err) {
   if (err instanceof ScanBusyError) {
     console.error(err.message);

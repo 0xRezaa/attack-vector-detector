@@ -59,8 +59,16 @@ export async function getSampleReport(): Promise<AuditReport> {
   return JSON.parse(raw) as AuditReport;
 }
 
-async function writeAuditReport(report: AuditReport): Promise<void> {
-  await writeFile(auditReportPath, `${JSON.stringify(report, null, 2)}\n`, "utf-8");
+async function persistAuditReport(
+  report: AuditReport,
+  specialistReports: AgentReport[],
+  onProgress?: (event: ScanProgressEvent) => void,
+  interim = false,
+): Promise<AuditReport> {
+  const safe = normalizeAuditReport(report, specialistReports);
+  await writeFile(auditReportPath, `${JSON.stringify(safe, null, 2)}\n`, "utf-8");
+  onProgress?.({ type: "report:write", path: auditReportPath, interim });
+  return safe;
 }
 
 function resolveTarget(target: string): string {
@@ -89,10 +97,12 @@ async function runOrchestrator(
   return mergeReportsDeterministic(reports);
 }
 
+type LiveScanResult = { report: AuditReport; specialistReports: AgentReport[] };
+
 async function runLiveScan(
   target: string,
   onProgress?: (event: ScanProgressEvent) => void,
-): Promise<AuditReport> {
+): Promise<LiveScanResult> {
   const cwd = resolveTarget(target);
   const apiKey = requireApiKey();
 
@@ -142,6 +152,14 @@ async function runLiveScan(
   }
 
   if (reports.length < 2) {
+    if (reports.length > 0) {
+      await persistAuditReport(
+        mergeReportsDeterministic(reports),
+        reports,
+        onProgress,
+        true,
+      );
+    }
     onProgress?.({ type: "scan:error", message: "Fewer than 2 specialists returned valid JSON" });
     throw new ScanPartialFailureError(
       "Fewer than 2 specialists returned valid JSON",
@@ -149,12 +167,19 @@ async function runLiveScan(
     );
   }
 
+  await persistAuditReport(
+    mergeReportsDeterministic(reports),
+    reports,
+    onProgress,
+    true,
+  );
+
   onProgress?.({ type: "orchestrator:start" });
   const auditReport = await runOrchestrator(reports, cwd, apiKey);
   onProgress?.({ type: "orchestrator:done" });
   onProgress?.({ type: "scan:complete", auditReport });
 
-  return auditReport;
+  return { report: auditReport, specialistReports: reports };
 }
 
 export async function runScan(
@@ -167,14 +192,13 @@ export async function runScan(
 
   busy = true;
   try {
-    const report = options?.sample
-      ? await getSampleReport()
-      : await runLiveScan(target, options?.onProgress);
+    if (options?.sample) {
+      const report = await getSampleReport();
+      return persistAuditReport(report, [], options?.onProgress);
+    }
 
-    options?.onProgress?.({ type: "report:write", path: auditReportPath });
-    const safe = normalizeAuditReport(report, []);
-    await writeAuditReport(safe);
-    return safe;
+    const { report, specialistReports } = await runLiveScan(target, options?.onProgress);
+    return persistAuditReport(report, specialistReports, options?.onProgress);
   } finally {
     busy = false;
   }
