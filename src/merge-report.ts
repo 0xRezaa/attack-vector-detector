@@ -8,6 +8,13 @@ import type {
 
 const GRADES = new Set(["A", "B", "C", "D", "F"]);
 
+const SEVERITY_RANK: Record<Finding["severity"], number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+};
+
 export function assignFindingIds(
   agent: string,
   findings: FindingInput[],
@@ -26,16 +33,50 @@ export function assignFindingIds(
   });
 }
 
+function findingLocationKey(f: Pick<Finding, "file" | "line">): string {
+  return `${f.file}|${f.line ?? 0}`;
+}
+
+function pickPreferredFinding(a: Finding, b: Finding): Finding {
+  const rankA = SEVERITY_RANK[a.severity];
+  const rankB = SEVERITY_RANK[b.severity];
+  if (rankA !== rankB) return rankA < rankB ? a : b;
+  return a.title.length >= b.title.length ? a : b;
+}
+
+/** Collapse overlap when multiple specialists flag the same file:line. */
 export function dedupeFindings(findings: Finding[]): Finding[] {
-  const seen = new Set<string>();
-  const out: Finding[] = [];
+  const byKey = new Map<string, Finding>();
   for (const f of findings) {
-    const key = `${f.file}|${f.line ?? 0}|${f.category}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(f);
+    const key = findingLocationKey(f);
+    const existing = byKey.get(key);
+    byKey.set(key, existing ? pickPreferredFinding(existing, f) : f);
   }
-  return out;
+  return [...byKey.values()];
+}
+
+export function specialistFindingsWithIds(
+  reports: AgentReport[],
+): Finding[] {
+  return reports.flatMap((r) => assignFindingIds(r.agent, r.findings));
+}
+
+/** Attach reportedBy when the orchestrator omits it, using specialist file:line matches. */
+export function enrichFindingsFromReports(
+  findings: Finding[],
+  reports: AgentReport[],
+): Finding[] {
+  const specialists = specialistFindingsWithIds(reports);
+  return findings.map((f) => {
+    if (f.reportedBy) return f;
+    const line = f.line ?? 0;
+    const exact = specialists.find(
+      (s) => s.file === f.file && (s.line ?? 0) === line,
+    );
+    const fallback = specialists.find((s) => s.file === f.file);
+    const match = exact ?? fallback;
+    return match ? { ...f, reportedBy: match.reportedBy } : f;
+  });
 }
 
 export function countSeverities(
@@ -60,18 +101,21 @@ export function gradeFromFindings(findings: Finding[]): string {
   return "A";
 }
 
-export function agentContributionsFromReports(
-  reports: AgentReport[],
-  mergedCount: number,
+/** Count findings in the merged report per specialist (post-dedupe). */
+export function agentContributionsFromFindings(
+  findings: Finding[],
 ): Record<string, number> {
   const contributions: Record<string, number> = {
     "secrets-scout": 0,
     "auth-guard": 0,
     "injection-hunter": 0,
-    orchestrator: mergedCount,
+    orchestrator: findings.length,
   };
-  for (const r of reports) {
-    contributions[r.agent] = r.findings.length;
+  for (const f of findings) {
+    const agent = f.reportedBy;
+    if (agent && agent in contributions && agent !== "orchestrator") {
+      contributions[agent]++;
+    }
   }
   return contributions;
 }
@@ -79,10 +123,7 @@ export function agentContributionsFromReports(
 export function mergeReportsDeterministic(
   reports: AgentReport[],
 ): AuditReport {
-  const withIds = reports.flatMap((r) =>
-    assignFindingIds(r.agent, r.findings),
-  );
-  const findings = dedupeFindings(withIds);
+  const findings = dedupeFindings(specialistFindingsWithIds(reports));
   const findingCount = countSeverities(findings);
   const grade = gradeFromFindings(findings);
   const critical = findings.filter((f) => f.severity === "critical");
@@ -104,7 +145,7 @@ export function mergeReportsDeterministic(
       "Generate fix PLAN, copy for Cursor, and remediate in demo-app within the time box.",
     ],
     findings,
-    agentContributions: agentContributionsFromReports(reports, findings.length),
+    agentContributions: agentContributionsFromFindings(findings),
   };
 }
 
@@ -112,12 +153,14 @@ export function normalizeAuditReport(
   raw: AuditReport,
   fallbackReports: AgentReport[],
 ): AuditReport {
-  const findings = dedupeFindings(
+  const enriched = enrichFindingsFromReports(
     raw.findings.map((f, i) => ({
       ...f,
       id: f.id?.trim() || `finding-${i + 1}`,
     })),
+    fallbackReports,
   );
+  const findings = dedupeFindings(enriched);
   const findingCount = countSeverities(findings);
   const grade = GRADES.has(raw.grade) ? raw.grade : gradeFromFindings(findings);
 
@@ -128,11 +171,7 @@ export function normalizeAuditReport(
     topExploitChain: raw.topExploitChain,
     demoScript: raw.demoScript?.length === 3 ? raw.demoScript : mergeReportsDeterministic(fallbackReports).demoScript,
     findings,
-    agentContributions: {
-      ...agentContributionsFromReports(fallbackReports, findings.length),
-      ...raw.agentContributions,
-      orchestrator: findings.length,
-    },
+    agentContributions: agentContributionsFromFindings(findings),
   };
 }
 
